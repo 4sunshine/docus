@@ -8,7 +8,7 @@ from tqdm import tqdm
 import json
 
 
-IOU_THRESHOLD = 0.5
+IOU_THRESHOLD = 0.15
 
 
 def get_annotations(page):
@@ -24,6 +24,8 @@ def get_annotations(page):
                         print('HAS EXCEPTION')
                         print(type(anno_rect[0]))
                         continue
+                    else:
+                        anno_rect = [float(x) for x in anno_rect]
                 anno_bboxes.append(anno_rect)
     return anno_bboxes
 
@@ -55,7 +57,7 @@ def get_texts(page_layout, anno_bboxes):
                     iou = calculate_iou(bbox_poly, a_poly)
                     if iou > IOU_THRESHOLD:
                         is_matched[a_ind] = True
-                        texts.append(element.get_text())
+                        texts.append(str(element.get_text()))
                         bboxes.append(element.bbox)
                         bboxes_inds.append(a_ind)
                 else:
@@ -99,14 +101,13 @@ def prepare_data(data_folder):
     all_files = os.listdir(data_folder)
     all_files = sorted([f for f in all_files if f.endswith('.pdf')])
 
-    result = []
+    os.makedirs('result', exist_ok=True)
 
     for f in tqdm(all_files, total=len(all_files)):
         anno = play(os.path.join(data_folder, f))
-        result.append(anno)
-
-    with open('result.json', 'w') as f:
-        json.dump(result, f)
+        doc_id = anno['doc_id']
+        with open(f'result/{doc_id}.json', 'w', encoding='utf8') as fw:
+            json.dump(anno, fw)
 
 
 if __name__ == '__main__':
