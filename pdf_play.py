@@ -1,17 +1,15 @@
 import PyPDF2
 import sys
 
+from PyPDF2 import PdfFileReader
+from pdfminer.layout import LTTextContainer
+from pdfminer.high_level import extract_pages
+
+
 def play(path):
-    from PyPDF2 import PdfFileReader
+    reader = PdfFileReader(path)
 
-    import pdfminer.high_level  # $ pip install pdfminer.six
-
-    #with open(path, 'rb') as file:
-    text = pdfminer.high_level.extract_text(pdf_file=path)
-
-    from pdfminer.high_level import extract_pages
-    from pdfminer.layout import LTTextContainer
-    for j,page_layout in enumerate(extract_pages(path)):
+    for j, (page_layout, page) in enumerate(zip(extract_pages(path), reader)):
         print('*****', j)
         for element in page_layout:
             print(element)
@@ -21,7 +19,7 @@ def play(path):
     #exit(0)
         # pdfminer.high_level.extract_text_to_fp(file, sys.stdout)
 
-    reader = PdfFileReader(path)
+
 
     for i, page in enumerate(reader.pages):
         print('PAGE', i)
