@@ -1,21 +1,55 @@
 import os
 import PyPDF2
+import pdfminer.layout
 from PyPDF2 import PdfFileReader
 from pdfminer.layout import LTTextBoxHorizontal, LTTextBoxVertical
 from pdfminer.high_level import extract_pages
 from shapely.geometry import Polygon
 from tqdm import tqdm
 import json
+from pdfminer.image import ImageWriter
+import codecs
+import cv2
 
 
-IOU_THRESHOLD = 0.15
+IOU_THRESHOLD = 0.05
+
+def get_image(layout_object):
+    if isinstance(layout_object, pdfminer.layout.LTImage):
+        return layout_object
+    if isinstance(layout_object, pdfminer.layout.LTContainer):
+        for child in layout_object:
+            return get_image(child)
+    else:
+        return None
+#
+# from PIL import Image
+# def save_images_from_page(page: pdfminer.layout.LTPage, out_dir='output_dir'):
+#     images = list(filter(bool, map(get_image, page)))
+#     iw = ImageWriter(out_dir)
+#     for image in images:
+#         name = iw.export_image(image)
+#         filename = os.path.join(out_dir, name)
+#         print(filename)
+#         im = Image.open(filename).convert('RGB')
+#
+#         #img = cv2.imread(filename)
+#         basename = 'kek.png'
+#         im.save(os.path.join(out_dir, basename))
+#         #cv2.imwrite(os.path.join(out_dir, basename), img)
+#         exit(0)
 
 
 def get_annotations(page):
     anno_bboxes = []
+    print('**************')
+    print(page)
+    print('#################')
+
     if '/Annots' in page:
         for annot in page["/Annots"]:
             obj = annot.getObject()
+            print(obj)
             if '/C' in obj:
                 assert '/Rect' in obj
                 anno_rect = obj['/Rect']
@@ -27,6 +61,8 @@ def get_annotations(page):
                     else:
                         anno_rect = [float(x) for x in anno_rect]
                 anno_bboxes.append(anno_rect)
+        print(anno_bboxes)
+        exit(0)
     return anno_bboxes
 
 
@@ -42,9 +78,17 @@ def calculate_iou(poly_1, poly_2):
     return iou
 
 
+def calculate_inclusion(poly_1, poly_2):
+    inclusion = 0
+    if poly_1.area > 0:
+        inclusion = poly_1.intersection(poly_2).area / poly_1.area
+    return inclusion
+
+
 def get_texts(page_layout, anno_bboxes):
     anno_polys = [convert_bbox_to_poly(bbox) for bbox in anno_bboxes]
     is_matched = [False] * len(anno_polys)
+    matched_dict = {i: [] for i in range(len(anno_polys))}
     texts = []
     bboxes = []
     bboxes_inds = []
@@ -55,15 +99,22 @@ def get_texts(page_layout, anno_bboxes):
             for a_ind, a_poly in enumerate(anno_polys):
                 if not is_matched[a_ind]:
                     iou = calculate_iou(bbox_poly, a_poly)
+                    inclusion = calculate_inclusion(bbox_poly, a_poly)
+
+                    if inclusion > IOU_THRESHOLD:
+                        matched_dict[a_ind].append()
+                        print(element.get_text())
+                        print(inclusion)
+                        print(element)
                     if iou > IOU_THRESHOLD:
-                        is_matched[a_ind] = True
-                        texts.append(str(element.get_text()))
+                        #is_matched[a_ind] = True
+                        texts.append(element.get_text())
                         bboxes.append(element.bbox)
                         bboxes_inds.append(a_ind)
                 else:
                     continue
 
-    return texts, bboxes, bboxes_inds
+    return texts, bboxes, bboxes_inds, is_matched
 
 
 def play(path):
@@ -80,34 +131,88 @@ def play(path):
         'doc_id': doc_id,
     }
 
+    success = True
+
     for j, (page_layout, page) in enumerate(zip(extract_pages(path), reader.pages)):
         # GET ALL ANNOTATIONS FROM PAGE:
+        # save_images_from_page(page_layout)
         anno_bboxes = get_annotations(page)
 
-        all_texts, all_bboxes, bboxes_inds = [], [], []
+        all_texts, all_bboxes, bboxes_inds, is_matched = [], [], [], []
 
         if len(anno_bboxes) > 0:
-            all_texts, all_bboxes, bboxes_inds = get_texts(page_layout, anno_bboxes)
+            all_texts, all_bboxes, bboxes_inds, is_matched = get_texts(page_layout, anno_bboxes)
+
+        if not all(is_matched):
+            success = False
 
         document_annotations['texts'].append(all_texts)
         document_annotations['bboxes'].append(all_bboxes)
         document_annotations['bboxes_inds'].append(bboxes_inds)
         document_annotations['anno_bboxes'].append(anno_bboxes)
 
-    return document_annotations
+    return document_annotations, success
 
+import pdfplumber
+
+def plumb(filepath):
+    document_data = []
+    with pdfplumber.open(filepath) as pdf:
+        for page_num, page in enumerate(pdf.pages):
+
+            hl_bboxes = []
+
+            for anno in page.annots:
+                bbox_a = [anno['x0'], anno['y0'], anno['x1'], anno['y1']]
+
+                #print(pdfminer.psparser.PSLiteral())
+
+                #print(anno['data'])
+                # print(dir(anno['data']['Subtype']))
+                # print(anno['data']['Subtype'].name)
+                #print(anno['data']['Subtype'].name)
+                if anno['data']['Subtype'].name == 'Highlight':
+                #
+                # if 'Subj' in anno['data']:
+                    hl_bboxes.append(bbox_a)
+
+            hl_polys = [convert_bbox_to_poly(b) for b in hl_bboxes]
+
+            texts = {i: '' for i in range(len(hl_polys))}
+
+            for sym in page.chars:
+                bbox = [sym['x0'], sym['y0'], sym['x1'], sym['y1']]
+
+                bbox_p = convert_bbox_to_poly(bbox)
+
+                for ind_h, h_pol in enumerate(hl_polys):
+                    iod = calculate_inclusion(bbox_p, h_pol)
+                    if iod > IOU_THRESHOLD:
+                        texts[ind_h] += sym['text']
+                        break
+
+            page_data = {
+                'annotation_bboxes': hl_bboxes,
+                'annotations': texts,
+                'page_size': [page.width, page.height],
+            }
+
+            document_data.append(page_data)
+    return document_data
 
 def prepare_data(data_folder):
     all_files = os.listdir(data_folder)
-    all_files = sorted([f for f in all_files if f.endswith('.pdf')])
+    all_files = sorted([f for f in all_files if f.endswith('.pdf') and f.startswith('2017')])
 
     os.makedirs('result', exist_ok=True)
 
     for f in tqdm(all_files, total=len(all_files)):
-        anno = play(os.path.join(data_folder, f))
-        doc_id = anno['doc_id']
-        with open(f'result/{doc_id}.json', 'w', encoding='utf8') as fw:
-            json.dump(anno, fw)
+        filepath = os.path.join(data_folder, f)
+        res = plumb(filepath)
+        doc_id = os.path.splitext(f)[0]
+
+        with open(f'result/{doc_id}.json', 'w', encoding='windows-1251') as fw:
+            json.dump(res, fw)
 
 
 if __name__ == '__main__':
