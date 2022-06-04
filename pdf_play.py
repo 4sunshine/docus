@@ -2,7 +2,7 @@ import os
 import PyPDF2
 import pdfminer.layout
 from PyPDF2 import PdfFileReader
-from pdfminer.layout import LTTextBoxHorizontal, LTTextBoxVertical
+from pdfminer.layout import LTTextBoxHorizontal, LTTextBoxVertical, LTLine
 from pdfminer.high_level import extract_pages
 from shapely.geometry import Polygon
 from tqdm import tqdm
@@ -12,7 +12,7 @@ import codecs
 import cv2
 
 
-IOU_THRESHOLD = 0.05
+IOU_THRESHOLD = 0.0001
 
 def get_image(layout_object):
     if isinstance(layout_object, pdfminer.layout.LTImage):
@@ -155,12 +155,19 @@ def play(path):
 
 import pdfplumber
 
+#from pdfplumber.page import LTTe
+
 def plumb(filepath):
     document_data = []
     with pdfplumber.open(filepath) as pdf:
         for page_num, page in enumerate(pdf.pages):
 
             hl_bboxes = []
+
+            te = page.extract_words()
+
+            words = [w['text'] for w in te]
+            #print(words)
 
             for anno in page.annots:
                 bbox_a = [anno['x0'], anno['y0'], anno['x1'], anno['y1']]
@@ -169,21 +176,35 @@ def plumb(filepath):
 
                 #print(anno['data'])
                 # print(dir(anno['data']['Subtype']))
-                # print(anno['data']['Subtype'].name)
+                #print(anno['data']['Subtype'].name)
                 #print(anno['data']['Subtype'].name)
                 if anno['data']['Subtype'].name == 'Highlight':
-                #
-                # if 'Subj' in anno['data']:
                     hl_bboxes.append(bbox_a)
 
             hl_polys = [convert_bbox_to_poly(b) for b in hl_bboxes]
 
             texts = {i: '' for i in range(len(hl_polys))}
 
+            ff = ''
+
+            #print(bbox_a)
+            #exit(0)
+
             for sym in page.chars:
                 bbox = [sym['x0'], sym['y0'], sym['x1'], sym['y1']]
 
+                #print(bbox)
+                if bbox[0] == bbox[2]:
+                    bbox[2] = bbox[2] + 2
+                    #print('WWWWWWWW')
+                if bbox[1] == bbox[3]:
+                    bbox[3] = bbox[3] + 2
+                    #print('YYYYYYY')
+
+
                 bbox_p = convert_bbox_to_poly(bbox)
+
+                ff += sym['text']
 
                 for ind_h, h_pol in enumerate(hl_polys):
                     iod = calculate_inclusion(bbox_p, h_pol)
@@ -198,11 +219,119 @@ def plumb(filepath):
             }
 
             document_data.append(page_data)
+
+            #print(ff)
+
+            # result = ff
+            #
+            # final_string = ''
+            #
+            # if 'внесен' in ff.lower() and (page_num == 0):
+            #     #print('HOORAY')
+            #     index = ff.lower().find('внесен')
+            #     #print(index)
+            #     result = result[:index]
+            #     # print(words)
+            #     # for w in words:
+            #     #     if w.lower() in result and (len(w) > 3):
+            #     #         final_string += w + ' '
+            #     #
+            #     # final_string = final_string[:-1]
+            #     # print(final_string)
+            #
+            # elif 'внесён' in ff.lower() and (page_num == 0):
+            #     #print('HOORAY')
+            #     index = ff.lower().find('внесён')
+            #     #print(index)
+            #     result = result[:index]
+            #
+            # if page_num == 0:
+            #     print(result)
+        # exit(0)
+
     return document_data
+
+
+def plumb_(filepath):
+    document_data = []
+    with pdfplumber.open(filepath) as pdf:
+        for page_num, page in enumerate(pdf.pages):
+
+            hl_bboxes = []
+
+            te = page.extract_words()
+
+            words = [w['text'] for w in te]
+            print(words)
+            # exit(0)
+
+            # print(page.lines)
+            #
+            # for element in page.layout:
+            #     if isinstance(element, LTLine):
+            #         print(element)
+            #         print('&&&&&&&')
+
+            # exit(0)
+            # print(dir(page))
+            # table = page.vertical_edges
+            # print(page.objects)
+            # print(table)
+            # exit(0)
+
+            for anno in page.annots:
+                bbox_a = [anno['x0'], anno['y0'], anno['x1'], anno['y1']]
+
+                # print(pdfminer.psparser.PSLiteral())
+
+                # print(anno['data'])
+                # print(dir(anno['data']['Subtype']))
+                print(anno['data']['Subtype'].name)
+                # print(anno['data']['Subtype'].name)
+                if anno['data']['Subtype'].name == 'Highlight':
+                    hl_bboxes.append(bbox_a)
+
+
+            hl_polys = [convert_bbox_to_poly(b) for b in hl_bboxes]
+
+            texts = {i: '' for i in range(len(hl_polys))}
+
+            ff = ''
+
+            for sym in page.chars:
+                bbox = [sym['x0'], sym['y0'], sym['x1'], sym['y1']]
+
+                bbox_p = convert_bbox_to_poly(bbox)
+
+                ff += sym['text']
+
+                for ind_h, h_pol in enumerate(hl_polys):
+                    iod = calculate_inclusion(bbox_p, h_pol)
+                    if iod > IOU_THRESHOLD:
+                        texts[ind_h] += sym['text']
+                        break
+
+            page_data = {
+                'annotation_bboxes': hl_bboxes,
+                'annotations': texts,
+                'page_size': [page.width, page.height],
+            }
+
+            document_data.append(page_data)
+
+            print(ff)
+
+            result = ff.lower()
+
+            if 'внесен' in ff.lower() and (page_num == 0):
+                print('HOORAY')
+                result = ff
+            # exit(0)
+
 
 def prepare_data(data_folder):
     all_files = os.listdir(data_folder)
-    all_files = sorted([f for f in all_files if f.endswith('.pdf') and f.startswith('2017')])
+    all_files = sorted([f for f in all_files if f.endswith('.pdf') and f.startswith('2005')])[0:]
 
     os.makedirs('result', exist_ok=True)
 
@@ -211,8 +340,27 @@ def prepare_data(data_folder):
         res = plumb(filepath)
         doc_id = os.path.splitext(f)[0]
 
-        with open(f'result/{doc_id}.json', 'w', encoding='windows-1251') as fw:
+        # with open(f'result/{doc_id}.json', 'w', encoding='windows-1251') as fw:
+        with open(f'result/{doc_id}.json', 'w') as fw:
             json.dump(res, fw)
+
+        #break
+
+def prepare_data_2011(data_folder):
+    all_files = os.listdir(data_folder)
+    all_files = sorted([f for f in all_files if f.endswith('.pdf') and f.startswith('2010')])[1:]
+
+    os.makedirs('result', exist_ok=True)
+
+    for f in tqdm(all_files, total=len(all_files)):
+        filepath = os.path.join(data_folder, f)
+        res = plumb(filepath)
+        doc_id = os.path.splitext(f)[0]
+
+        # with open(f'result/{doc_id}.json', 'w', encoding='windows-1251') as fw:
+        with open(f'result/{doc_id}.json', 'w') as fw:
+            json.dump(res, fw)
+        break
 
 
 if __name__ == '__main__':
