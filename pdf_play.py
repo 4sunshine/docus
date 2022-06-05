@@ -262,6 +262,7 @@ def plumb_(filepath):
             te = page.extract_words()
 
             words = [w['text'] for w in te]
+
             print(words)
             # exit(0)
 
